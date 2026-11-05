@@ -1,0 +1,17 @@
+
+services:
+  edge-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: edge-ai-zonas-risco:local
+    container_name: edge-ai-zonas-risco
+
+    ports:
+      - "8000:8000"
+
+    restart: always
+
+    environment:
+      - YOLO_CONFIG_DIR=/tmp/ultralytics
