@@ -1,0 +1,24 @@
+
+# Ambiente Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Arquivos temporarios e resultados
+outputs/
+*.log
+
+# Imagens e videos de teste locais
+examples/imagens/
+examples/videos/
+
+# Configuracoes locais
+.env
+.env.*
+!.env.example
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db

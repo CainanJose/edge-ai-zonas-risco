@@ -1,4 +1,6 @@
 
+from typing import Literal
+
 import cv2
 import numpy as np
 
@@ -12,6 +14,9 @@ app = FastAPI(
     description="API de deteccao de pessoas e classificacao de riscos.",
     version="1.0.0"
 )
+
+# Cenarios disponiveis
+Cenario = Literal["padrao", "deposito", "corredor"]
 
 
 async def carregar_imagem(file: UploadFile):
@@ -41,19 +46,25 @@ def health():
 
 
 @app.post("/infer/json")
-async def inferir_json(file: UploadFile = File(...)):
+async def inferir_json(
+    file: UploadFile = File(...),
+    cenario: Cenario = "padrao"
+):
     imagem = await carregar_imagem(file)
 
-    dados, _ = analisar_imagem(imagem)
+    dados, _ = analisar_imagem(imagem, cenario)
 
     return dados
 
 
 @app.post("/infer/image")
-async def inferir_imagem(file: UploadFile = File(...)):
+async def inferir_imagem(
+    file: UploadFile = File(...),
+    cenario: Cenario = "padrao"
+):
     imagem = await carregar_imagem(file)
 
-    _, anotada = analisar_imagem(imagem)
+    _, anotada = analisar_imagem(imagem, cenario)
 
     sucesso, buffer = cv2.imencode(".png", anotada)
 
