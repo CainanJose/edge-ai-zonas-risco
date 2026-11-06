@@ -1,24 +1,40 @@
 
+# ==========================================
 # Ambiente Python
+# ==========================================
 .venv/
 venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# ==========================================
 # Arquivos temporarios e resultados
+# ==========================================
 outputs/
 *.log
 
-# Imagens e videos de teste locais
-examples/imagens/
+# ==========================================
+# Imagens de exemplo
+# ==========================================
+# Ignora todas, exceto a imagem selecionada
+examples/imagens/*
+!examples/imagens/test.jpg
+
+# ==========================================
+# Videos locais
+# ==========================================
 examples/videos/
 
+# ==========================================
 # Configuracoes locais
+# ==========================================
 .env
 .env.*
 !.env.example
 
+# ==========================================
 # Arquivos do sistema
+# ==========================================
 .DS_Store
 Thumbs.db
