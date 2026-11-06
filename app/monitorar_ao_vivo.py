@@ -10,6 +10,64 @@ from app.vision import analisar_imagem
 from app.zones import CENARIOS
 
 
+def abrir_camera(indice_camera):
+    """
+    Abre uma camera utilizando backends compativeis.
+
+    No Windows, prioriza Media Foundation (MSMF).
+    Caso nao funcione, tenta DirectShow e CAP_ANY.
+    """
+
+    if sys.platform.startswith("win"):
+        backends = [
+            ("Media Foundation", cv2.CAP_MSMF),
+            ("DirectShow", cv2.CAP_DSHOW),
+            ("Automatico", cv2.CAP_ANY)
+        ]
+    else:
+        backends = [
+            ("Automatico", cv2.CAP_ANY)
+        ]
+
+    for nome, backend in backends:
+        print(f"Tentando camera {indice_camera} com {nome}...")
+
+        captura = cv2.VideoCapture(
+            indice_camera,
+            backend
+        )
+
+        if not captura.isOpened():
+            captura.release()
+            continue
+
+        # Configuracao inicial da camera
+        captura.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        captura.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        # Tenta reduzir o buffer, se suportado
+        captura.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        # Verifica se consegue capturar um quadro real
+        sucesso, imagem = captura.read()
+
+        if sucesso and imagem is not None:
+            print(
+                f"Camera {indice_camera} conectada "
+                f"com sucesso usando {nome}!"
+            )
+
+            return captura
+
+        captura.release()
+
+    raise RuntimeError(
+        f"Nao foi possivel abrir a camera {indice_camera}. "
+        "Verifique o indice, a conexao USB e as "
+        "permissoes do Windows."
+    )
+
+
 def monitorar_ao_vivo(
     fonte,
     cenario="padrao",
@@ -18,24 +76,20 @@ def monitorar_ao_vivo(
     repetir=False,
     max_quadros=0
 ):
-    # Identifica se a fonte e webcam ou arquivo
+    """
+    Executa o monitoramento continuo utilizando
+    webcam ou arquivo de video.
+
+    Reutiliza o pipeline de deteccao, zonas e alertas.
+    """
+
+    # 1. Identifica se a fonte e webcam ou arquivo
     webcam = fonte.isdecimal()
 
     if webcam:
         indice_camera = int(fonte)
 
-        if sys.platform.startswith("win"):
-            captura = cv2.VideoCapture(
-                indice_camera, cv2.CAP_DSHOW
-            )
-        else:
-            captura = cv2.VideoCapture(indice_camera)
-
-        captura.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        captura.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        # Tenta reduzir o buffer, se suportado
-        captura.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        captura = abrir_camera(indice_camera)
 
     else:
         caminho = Path(fonte)
@@ -52,6 +106,7 @@ def monitorar_ao_vivo(
             f"Nao foi possivel abrir a fonte: {fonte}"
         )
 
+    # 2. Informacoes da fonte
     fps_origem = captura.get(cv2.CAP_PROP_FPS)
 
     if fps_origem <= 0:
@@ -76,12 +131,14 @@ def monitorar_ao_vivo(
 
     try:
         while True:
+            # 3. Captura o proximo quadro
             sucesso, imagem = captura.read()
 
             if not sucesso:
                 if not webcam and repetir:
                     captura.set(
-                        cv2.CAP_PROP_POS_FRAMES, 0
+                        cv2.CAP_PROP_POS_FRAMES,
+                        0
                     )
                     continue
 
@@ -93,9 +150,9 @@ def monitorar_ao_vivo(
             if (lidos - 1) % intervalo != 0:
                 continue
 
+            # 4. Redimensiona preservando a proporcao
             altura, largura = imagem.shape[:2]
 
-            # Redimensiona mantendo a proporcao
             if largura > largura_max:
                 nova_altura = int(
                     altura * largura_max / largura
@@ -107,11 +164,12 @@ def monitorar_ao_vivo(
                     interpolation=cv2.INTER_AREA
                 )
 
-            # Reutiliza o pipeline completo
+            # 5. Executa o pipeline de visao computacional
             inicio_quadro = time.perf_counter()
 
             dados, anotada = analisar_imagem(
-                imagem, cenario
+                imagem,
+                cenario
             )
 
             tempo_ms = (
@@ -121,18 +179,22 @@ def monitorar_ao_vivo(
             tempos.append(tempo_ms)
             processados += 1
 
+            # 6. Registra os alertas
             nivel = dados["alerta"]["nivel"]
+
             alertas[nivel] += 1
 
+            # 7. Calcula o FPS efetivo
             duracao = (
                 time.perf_counter() - inicio_total
             )
 
             fps_efetivo = processados / max(
-                duracao, 0.001
+                duracao,
+                0.001
             )
 
-            # Mostra informacoes no rodape
+            # 8. Adiciona informacoes no rodape
             h, w = anotada.shape[:2]
 
             cv2.rectangle(
@@ -159,13 +221,14 @@ def monitorar_ao_vivo(
                 1
             )
 
+            # 9. Exibe o monitoramento
             cv2.imshow(
                 "Edge AI - Monitoramento de Risco",
                 anotada
             )
 
-            # Webcam: apresenta o quadro assim que pronto.
-            # Video: tenta respeitar o FPS original.
+            # Webcam: exibe assim que o processamento termina
+            # Video: tenta respeitar o FPS original
             espera_ms = 1
 
             if not webcam:
@@ -180,6 +243,7 @@ def monitorar_ao_vivo(
 
             tecla = cv2.waitKey(espera_ms) & 0xFF
 
+            # 10. Permite encerrar com Q ou ESC
             if tecla in (ord("q"), 27):
                 break
 
@@ -188,14 +252,19 @@ def monitorar_ao_vivo(
                     break
 
     finally:
+        # Libera a webcam e fecha a janela
         captura.release()
         cv2.destroyAllWindows()
 
+    # 11. Apresenta as metricas finais
     duracao_total = (
         time.perf_counter() - inicio_total
     )
 
-    print("\n=== RESULTADO ===")
+    print("\n=== RESULTADO DO MONITORAMENTO ===")
+    print(f"Fonte utilizada: {fonte}")
+    print(f"Cenario: {cenario}")
+    print(f"Quadros lidos: {lidos}")
     print(f"Quadros processados: {processados}")
 
     if processados > 0:
@@ -220,7 +289,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fonte",
         required=True,
-        help="Indice da webcam (0) ou caminho de video"
+        help="Indice da webcam (0, 1, 2) ou caminho do video"
     )
 
     parser.add_argument(
