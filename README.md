@@ -4,7 +4,7 @@ Protótipo de **visão computacional embarcada (Edge AI)** para detectar pessoas
 
 A aplicação utiliza **YOLO26n**, **Python**, **OpenCV** e **FastAPI**. A inferência ocorre **localmente em CPU**, sem solicitar inferência a um serviço em nuvem. A API é distribuída em Docker, com build multi-arquitetura **AMD64/ARM64** para possibilitar adaptação à **Raspberry Pi 5**.
 
-> **Escopo e segurança:** este é um protótipo acadêmico de **detecção de presença em zonas fixas**, não um sistema certificado de segurança industrial. Ele não detecta automaticamente movimentos de máquinas, gestos perigosos ou incidentes ao longo do tempo. “SEGURO” significa apenas que a pessoa detectada está fora dos polígonos configurados.
+> **Comportamento de risco tratado:** a presença ou invasão de pessoas em **zonas de exclusão ao redor de máquinas** (invasão de área restrita e posicionamento inadequado em relação ao equipamento), classificada em níveis de criticidade: `PERIGO` na zona vermelha, `ATENCAO` na zona amarela e `SEGURO` fora delas. Trata-se de um protótipo não certificado, concebido como **camada complementar** às proteções físicas de segurança, e não como substituto delas.
 
 ## 1. Demonstração visual
 
@@ -36,6 +36,12 @@ flowchart LR
 4. O ponto é comparado a polígonos de risco definidos em coordenadas normalizadas; a zona vermelha tem prioridade sobre a amarela.
 5. O alerta global segue a maior criticidade observada: `CRITICO` > `ATENCAO` > `NORMAL`.
 6. A saída pode ser um JSON, uma imagem PNG anotada ou uma janela de monitoramento local.
+
+### Etapas do pipeline
+
+- **Pré-processamento:** decodificação do upload com `cv2.imdecode` (API) e redimensionamento opcional nos scripts de vídeo (`--largura`, preservando a proporção). O letterbox para 640 px e a normalização dos pixels são feitos pela Ultralytics dentro do `predict`.
+- **Inferência:** YOLO26n na CPU, restrito à classe `person`. O modelo é carregado uma única vez e aquecido com uma inferência inicial, para que a primeira requisição não pague o custo de inicialização.
+- **Pós-processamento:** filtro de confiança (`conf=0.35`), cálculo do ponto inferior central de cada caixa, classificação nas zonas, alerta global e anotação da imagem (polígonos, caixas, rótulo `pessoa <risco> <confiança>` e faixa de alerta).
 
 **Risco por pessoa:** `SEGURO`, `ATENCAO` ou `PERIGO`. **Nível do alerta global:** `NORMAL`, `ATENCAO` ou `CRITICO`. Os alertas são **visuais e informativos**; não existe acionamento físico de sirene ou relé nesta versão.
 
@@ -118,34 +124,43 @@ curl.exe -X POST "http://localhost:8000/infer/json?cenario=deposito" -F "file=@e
 
 A resposta contém cenário, modelo, dimensões, número de pessoas, contagens, tempo de inferência, alerta global e uma lista de detecções (classe, confiança, caixa, ponto de referência e risco).
 
-**Exemplo ilustrativo do formato da resposta** (valores fictícios, apenas para mostrar a estrutura; não é a saída de `test.jpg`):
+**Resposta real** para `examples/imagens/test.jpg` (2048 × 1366 px) no cenário `deposito`, obtida em 06/11/2026 no ambiente descrito na seção 9:
 
 ```json
 {
   "cenario": "deposito",
   "modelo": "yolo26n.pt",
-  "largura": 640,
-  "altura": 480,
-  "total_pessoas": 1,
-  "contagem": {"SEGURO": 0, "ATENCAO": 1, "PERIGO": 0},
-  "tempo_inferencia_ms": 198.7,
+  "largura": 2048,
+  "altura": 1366,
+  "total_pessoas": 2,
+  "contagem": {"SEGURO": 0, "ATENCAO": 2, "PERIGO": 0},
+  "tempo_inferencia_ms": 109.42,
   "alerta": {
     "ativo": true,
     "nivel": "ATENCAO",
-    "mensagem": "1 pessoa(s) na zona amarela",
+    "mensagem": "2 pessoa(s) na zona amarela",
     "resposta": "AVISO_VISUAL"
   },
   "deteccoes": [
     {
       "classe": "person",
-      "confianca": 0.84,
-      "bbox": [415, 120, 485, 350],
-      "ponto_referencia": [450, 350],
+      "confianca": 0.8366,
+      "bbox": [1237, 567, 1373, 959],
+      "ponto_referencia": [1305, 959],
+      "risco": "ATENCAO"
+    },
+    {
+      "classe": "person",
+      "confianca": 0.8319,
+      "bbox": [1414, 621, 1517, 962],
+      "ponto_referencia": [1465, 962],
       "risco": "ATENCAO"
     }
   ]
 }
 ```
+
+As detecções e a classificação são determinísticas para a mesma imagem e o mesmo cenário. O `tempo_inferencia_ms` varia conforme o hardware e a carga do sistema a cada chamada.
 
 ### 5.2. PNG anotado — `POST /infer/image`
 
@@ -154,7 +169,7 @@ New-Item -ItemType Directory -Force outputs | Out-Null
 curl.exe -X POST "http://localhost:8000/infer/image?cenario=deposito" -F "file=@examples/imagens/test.jpg" --output "outputs/resultado.png"
 ```
 
-A resposta tem `Content-Type: image/png`. Abra `outputs/resultado.png` para visualizar os polígonos, as caixas delimitadoras, o rótulo de risco com a confiança de cada pessoa e a faixa de alerta.
+A resposta tem `Content-Type: image/png`. Abra `outputs/resultado.png` para visualizar os polígonos, as caixas delimitadoras, o rótulo de cada pessoa (classe, risco e confiança, por exemplo `pessoa ATENCAO 84%`) e a faixa de alerta. O tamanho do texto acompanha a largura da imagem, para continuar legível em fotos de alta resolução.
 
 **Validação de entradas:** arquivo vazio ou não decodificável retorna HTTP `400`; um cenário desconhecido retorna `422`.
 
@@ -241,24 +256,40 @@ Esses valores são **referências do fabricante**, obtidas em outro hardware e e
 
 ### Resultado medido
 
-Medição local com o `monitorar_video.py`, usando o vídeo de teste de 30 quadros derivado de `test.jpg` (comandos na seção 7). Valores registrados no relatório JSON gerado pelo script:
+**Ambiente de medição (06/11/2026):**
 
-| Métrica | Valor |
-|---|---:|
-| Quadros lidos / processados | 30 / 30 |
-| Largura processada | 640 px |
-| FPS nominal do vídeo de entrada | 10 FPS |
-| **FPS efetivo de processamento** | **4,48 FPS** |
-| **Tempo médio de processamento por quadro** | **219,14 ms** |
-| Tempo total | 6,69 s |
-| Quadros com alerta `ATENCAO` | 30 de 30 |
+| Item | Valor |
+|---|---|
+| Processador | 13th Gen Intel Core i5-13420H (8 núcleos, 12 threads) |
+| Memória RAM | 8 GB (7,7 GiB visíveis ao sistema) |
+| Sistema operacional | Windows 11 Home (build 26200), execução fora do container |
+| Python / Ultralytics / PyTorch / OpenCV | 3.14.3 / 8.4.202 / 2.15.0+cpu / 5.0.0 |
+| Aceleração | Nenhuma: inferência PyTorch somente em CPU, sem GPU |
 
-**Ambiente:** notebook Windows, inferência em CPU com PyTorch, sem GPU. O modelo do processador e a quantidade de RAM não foram registrados junto a essa medição. Para registrá-los no Windows:
+Dados coletados com:
 
 ```powershell
 Get-CimInstance Win32_Processor | Select-Object Name
 Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
 ```
+
+**Procedimento:** `monitorar_video.py` com o vídeo de teste de 30 quadros (640 × 426 px) derivado de `test.jpg`, sempre com 2 pessoas e alerta `ATENCAO` em todos os quadros (comandos na seção 7). O teste foi executado cinco vezes, com os mesmos parâmetros.
+
+**Condições controladas:** notebook ligado ao carregador, Windows no modo de energia "Melhor desempenho" e terminal em primeiro plano.
+
+| Execução | FPS efetivo | Tempo médio por quadro (ms) |
+|---:|---:|---:|
+| 1 | 29,51 | 31,96 |
+| 2 | 18,25 | 52,14 |
+| 3 | 26,41 | 35,69 |
+| 4 | 24,91 | 37,74 |
+| 5 | 21,83 | 43,55 |
+
+**Resultado principal (mediana das 5 execuções): 24,91 FPS e 37,74 ms por quadro.** A faixa observada foi de **18,25 a 29,51 FPS** (31,96 a 52,14 ms por quadro).
+
+Medições anteriores no mesmo notebook, feitas sem controlar o modo de energia, variaram entre 3,6 e 17,4 FPS. Essa diferença mostra que o desempenho depende fortemente da configuração de energia e do agendamento das threads entre os núcleos de desempenho e de eficiência dessa CPU.
+
+O modelo é aquecido ao ser carregado (seção 2), de modo que essas médias **não incluem** o custo de inicialização.
 
 **Estes números são do notebook. Não são medições na Raspberry Pi 5.**
 
@@ -272,11 +303,22 @@ Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
 
 Nenhuma dessas métricas mede a latência completa entre a captura da câmera e a exibição do alerta. O `monitorar_video.py` processa os quadros sem espera artificial, por isso é o script indicado para benchmark.
 
-Por ser um ensaio curto, com um único quadro repetido, a média inclui o aquecimento inicial do modelo. A contagem de alertas é **por quadro**, não por incidentes distintos.
+É um ensaio curto, com um único quadro repetido. A contagem de alertas é **por quadro**, não por incidentes distintos.
+
+### Latência aceitável para o caso de uso
+
+Uma pessoa caminhando se desloca a cerca de **1,4 m/s**. A distância percorrida entre duas análises consecutivas é a velocidade dividida pelo FPS efetivo:
+
+- Mediana: 1,4 m/s ÷ 24,91 FPS ≈ 0,056 m, ou seja, **cerca de 5,6 cm** entre análises.
+- Faixa: de 1,4 ÷ 29,51 ≈ **4,7 cm** a 1,4 ÷ 18,25 ≈ **7,7 cm**.
+
+Mesmo na execução mais lenta, o deslocamento entre análises é pequeno em relação a zonas de alguns metros ao redor de uma empilhadeira ou máquina. Isso é suficiente para um **alerta visual de presença**: a pessoa é sinalizada logo depois de entrar na zona.
+
+**Não é suficiente para uma parada de emergência.** A proteção de pessoas contra o movimento de máquinas exige dispositivos de segurança certificados, como cortinas de luz ou scanners a laser, integrados a sistemas de comando projetados conforme a NR-12 e a ISO 13849. O sistema proposto é, portanto, um **alerta complementar**, e não um intertravamento de segurança.
 
 ### Viabilidade
 
-O resultado mostra que o pipeline completo (detecção, classificação nas zonas, alerta e anotação) funciona com **processamento local em CPU**, sem GPU e sem serviço em nuvem, a cerca de 4,5 quadros por segundo em 640 px. Essa taxa é adequada para um **monitoramento demonstrativo** de presença em zonas.
+O pipeline completo (detecção, classificação nas zonas, alerta e anotação) funciona com **processamento local em CPU**, sem GPU e sem serviço em nuvem, com mediana de 24,91 quadros por segundo em 640 px neste notebook, nas condições de energia descritas acima. Essa taxa é adequada para um **monitoramento demonstrativo** de presença em zonas.
 
 O resultado **não permite garantir** um tempo de resposta adequado para aplicações industriais de segurança. Isso exigiria requisitos de tempo de reação definidos para o processo, medições no hardware final e validação em campo. Latência e taxa de quadros variam conforme o processador, a resolução, o modelo, o formato de execução (PyTorch, ONNX, NCNN) e a carga do sistema.
 
@@ -298,6 +340,15 @@ O Dockerfile escolhe o PyTorch conforme a arquitetura: no AMD64, instala a vers�
 docker buildx imagetools inspect ghcr.io/cainanjose/edge-ai-zonas-risco:latest
 ```
 
+**Build multi-arquitetura local** (reproduzível sem o GitHub Actions; requer Docker com Buildx e emulação QEMU, já incluídos no Docker Desktop):
+
+```bash
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t edge-ai-zonas-risco:multiarch .
+```
+
+Sem `--push` (envio a um registry) ou `--load`, o resultado multiplataforma fica apenas no cache do Buildx. Ele serve para comprovar que a imagem é construída para as duas arquiteturas, mas não aparece em `docker images`. O build ARM64 por emulação é sensivelmente mais lento que o nativo.
+
 ### Estado da validação
 
 | Etapa | Situação |
@@ -318,9 +369,21 @@ O build ARM64 bem-sucedido mostra que a imagem pode ser construída para a arqui
 - **Aceleradores externos:** módulos de NPU podem ser avaliados em uma evolução futura. Eles exigem hardware e runtime específicos e não são necessários para o funcionamento atual.
 - **Operação:** usar fonte de alimentação adequada, dissipação de calor e câmera CSI ou USB compatível; monitorar temperatura, uso de CPU e memória.
 
-**Procedimento proposto para validação na placa:** em Raspberry Pi OS 64 bits, clonar o repositório e executar `docker compose up --build -d` (ou baixar a imagem do GHCR). Em seguida, verificar `/health`, testar `/infer/json` e `/infer/image` com `test.jpg` e medir latência, FPS e uso de recursos (`docker stats`) em várias execuções após o aquecimento.
+### Estimativa por referência técnica
 
-Referência externa: [Ultralytics — guia para Raspberry Pi](https://docs.ultralytics.com/guides/raspberry-pi/). Os benchmarks publicados ali usam outras configurações e não substituem medições deste pipeline.
+O guia oficial da Ultralytics para Raspberry Pi publica a latência do **YOLO26n na Raspberry Pi 5** (Ultralytics 8.4.108, precisão FP32, entrada de 640 px). Segundo o guia, esses tempos **não incluem** pré e pós-processamento:
+
+| Formato | Inferência (ms/imagem) | FPS equivalente (só inferência) |
+|---|---:|---:|
+| PyTorch | 299,09 | ≈ 3,3 |
+| ONNX | 125,99 | ≈ 7,9 |
+| NCNN | 67,03 | ≈ 14,9 |
+
+Fonte: [Ultralytics — guia para Raspberry Pi](https://docs.ultralytics.com/guides/raspberry-pi/), consultada em 06/11/2026. A coluna de FPS foi calculada aqui como 1000 ÷ ms.
+
+Como este projeto executa os pesos em PyTorch, a estimativa para a Raspberry Pi 5 é da ordem de **3 FPS apenas de inferência**, com valor efetivo um pouco menor depois de somar decodificação, classificação e anotação. Exportar o modelo para **NCNN** é a otimização mais indicada, com redução de cerca de 4,5 vezes no tempo de inferência segundo a mesma referência. Esses valores são **estimativas por referência externa, não medições deste projeto na placa**.
+
+**Procedimento proposto para validação na placa:** em Raspberry Pi OS 64 bits, clonar o repositório e executar `docker compose up --build -d` (ou baixar a imagem do GHCR). Em seguida, verificar `/health`, testar `/infer/json` e `/infer/image` com `test.jpg` e medir latência, FPS e uso de recursos (`docker stats`) em várias execuções após o aquecimento.
 
 ## 11. Testes
 
@@ -333,8 +396,19 @@ python -m pytest -q
 
 Os testes validam contratos e regras principais, mas não são uma avaliação estatística de precisão do modelo em ambiente industrial.
 
-## 12. Limitações e próximos passos
+## 12. Uso em aula
 
+Em um curso presencial de IA aplicada, o repositório serve como laboratório prático. Os alunos:
+
+1. Sobem o container e testam os endpoints pelo Swagger (`/docs`) ou com `curl`.
+2. Ajustam os polígonos em `app/zones.py` para uma nova cena e observam a mudança na classificação.
+3. Variam o limiar de confiança e discutem falsos positivos e falsos negativos.
+4. Comparam o FPS com diferentes valores de `--largura` e `--intervalo` e relacionam o resultado às restrições de um dispositivo de borda.
+
+## 13. Limitações e próximos passos
+
+- O sistema detecta presença em zonas fixas. Ele não reconhece gestos perigosos, não identifica o estado ou o movimento da máquina e não analisa incidentes ao longo do tempo. "SEGURO" significa apenas que a pessoa está fora dos polígonos configurados.
+- O operador dentro da máquina (por exemplo, na cabine da empilhadeira) pode ser detectado na zona vermelha e gerar um falso alerta crítico. Uma solução futura seria uma máscara de exclusão da cabine ou zonas condicionadas ao estado da máquina.
 - A geometria das zonas depende da posição e perspectiva da câmera; mudar o enquadramento exige recalibração.
 - O ponto inferior da caixa aproxima a posição dos pés e pode ser incorreto em cenas com oclusão, corte da pessoa ou perspectiva desfavorável.
 - Pessoas distantes, mal iluminadas ou parcialmente ocultas podem não ser detectadas.
@@ -344,7 +418,7 @@ Os testes validam contratos e regras principais, mas não são uma avaliação e
 
 **Possíveis evoluções (não necessárias ao desafio atual):** ampliar o conjunto de cenas industriais rotuladas, medir precisão e recall, avaliar otimização NCNN/ONNX e integrar mecanismos de alerta externos sob requisitos de segurança apropriados.
 
-## 13. Referências e licenciamento
+## 14. Referências e licenciamento
 
 - [Documentação do YOLO26 — Ultralytics](https://docs.ultralytics.com/models/yolo26/)
 - [Guia Ultralytics para Raspberry Pi](https://docs.ultralytics.com/guides/raspberry-pi/)

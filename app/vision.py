@@ -2,6 +2,7 @@
 import time
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 from app.zones import obter_zonas, classificar_risco
@@ -10,6 +11,16 @@ from app.alertas import gerar_alerta
 
 # Modelo carregado apenas uma vez
 modelo = YOLO("yolo26n.pt")
+
+# Aquecimento: o primeiro predict e muito mais lento (inicializacao
+# interna). Sem isso, a primeira requisicao da API e a media do
+# benchmark seriam distorcidas.
+modelo.predict(
+    source=np.zeros((640, 640, 3), dtype=np.uint8),
+    classes=[0],
+    device="cpu",
+    verbose=False
+)
 
 
 def analisar_imagem(imagem, cenario="padrao"):
@@ -85,6 +96,10 @@ def analisar_imagem(imagem, cenario="padrao"):
         "PERIGO": (0, 0, 255)
     }
 
+    # Texto proporcional a largura, legivel tambem em imagens grandes
+    escala = max(0.6, largura / 1200)
+    espessura = max(2, int(round(escala * 2)))
+
     # 5. Processa cada pessoa detectada
     for caixa in resultado.boxes:
         x1, y1, x2, y2 = map(
@@ -135,30 +150,31 @@ def analisar_imagem(imagem, cenario="padrao"):
         )
 
         # Adiciona a legenda
-        texto = f"{risco} {confianca:.0%}"
+        texto = f"pessoa {risco} {confianca:.0%}"
 
         tamanho, _ = cv2.getTextSize(
             texto,
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            2
+            escala,
+            espessura
         )
 
+        # Mantem o texto dentro dos limites da imagem
         x_texto = max(
             0,
             min(x1, largura - tamanho[0])
         )
 
-        y_texto = max(25, y1 - 10)
+        y_texto = max(tamanho[1] + 5, y1 - 10)
 
         cv2.putText(
             anotada,
             texto,
             (x_texto, y_texto),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
+            escala,
             cor,
-            2
+            espessura
         )
 
     # 6. Gera o alerta automaticamente
@@ -172,8 +188,23 @@ def analisar_imagem(imagem, cenario="padrao"):
             else (0, 255, 255)
         )
 
-        # Faixa escura no topo da imagem
-        altura_barra = min(60, altura)
+        texto_alerta = (
+            f"{alerta['nivel']}: {alerta['mensagem']}"
+        )
+
+        (largura_txt, altura_txt), base = cv2.getTextSize(
+            texto_alerta,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            escala,
+            espessura
+        )
+
+        # Faixa escura no topo, com altura proporcional ao texto
+        margem = int(altura_txt * 0.6)
+        altura_barra = min(
+            altura,
+            altura_txt + base + 2 * margem
+        )
 
         fundo = anotada.copy()
 
@@ -190,28 +221,27 @@ def analisar_imagem(imagem, cenario="padrao"):
         )
 
         # Indicador colorido
+        largura_indicador = max(8, int(8 * escala))
+
         cv2.rectangle(
             anotada,
             (0, 0),
-            (8, altura_barra - 1),
+            (largura_indicador, altura_barra - 1),
             cor_alerta,
             -1
         )
 
-        texto_alerta = (
-            f"{alerta['nivel']}: {alerta['mensagem']}"
-        )
-
-        escala = 0.6 if largura >= 800 else 0.45
-
         cv2.putText(
             anotada,
             texto_alerta,
-            (18, min(38, altura - 5)),
+            (
+                largura_indicador + 10,
+                min(margem + altura_txt, altura - 5)
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             escala,
             cor_alerta,
-            2
+            espessura
         )
 
     # 8. Monta o resultado final

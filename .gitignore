@@ -21,6 +21,9 @@ outputs/
 examples/imagens/*
 !examples/imagens/test.jpg
 
+# Imagem local usada por app/testar_zonas.py
+bus.jpg
+
 # ==========================================
 # Videos locais
 # ==========================================
