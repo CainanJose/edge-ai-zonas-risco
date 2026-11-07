@@ -193,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--fonte", required=True)
     parser.add_argument(
         "--cenario",
-        choices=["padrao", "deposito", "corredor"],
+        choices=["padrao", "deposito", "corredor", "prensa", "obra"],
         default="deposito"
     )
     parser.add_argument(

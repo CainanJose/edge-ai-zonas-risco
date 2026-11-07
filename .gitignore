@@ -20,6 +20,8 @@ outputs/
 # Ignora todas, exceto a imagem selecionada
 examples/imagens/*
 !examples/imagens/test.jpg
+!examples/imagens/prensa.jpg
+!examples/imagens/obra.jpg
 
 # Imagem local usada por app/testar_zonas.py
 bus.jpg

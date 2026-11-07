@@ -8,11 +8,27 @@ A aplicação utiliza **YOLO26n**, **Python**, **OpenCV** e **FastAPI**. A infer
 
 ## 1. Demonstração visual
 
+Cada cenário tem uma zona vermelha e uma zona amarela calibradas para a imagem de exemplo. As caixas indicam as pessoas detectadas, com rótulo de risco e confiança; o alerta global no topo resulta da posição dos pés de cada pessoa nas zonas.
+
+Em pessoas pequenas na imagem (caixa com menos de 20% da altura da imagem), o rótulo mostra só a confiança, e a cor da caixa indica o risco: **verde** para seguro, **amarelo** para atenção e **vermelho** para perigo.
+
+**Prensa hidráulica** (cenário `prensa`): o operador está na área de operação em frente à prensa (`PERIGO`) e outro trabalhador está fora das zonas (`SEGURO`). Alerta `CRITICO`.
+
 | Imagem de entrada | Resultado da inferência |
 |:---:|:---:|
-| ![Imagem original com empilhadeira e trabalhadores](examples/imagens/test.jpg) | ![Pessoas identificadas com zonas virtuais e alerta](docs/images/deposito-alerta.png) |
+| ![Operador em frente a uma prensa hidráulica](examples/imagens/prensa.jpg) | ![Operador na zona vermelha da prensa e trabalhador em área segura](docs/images/prensa-alerta.png) |
 
-O cenário `deposito` contém zonas vermelha e amarela definidas para a imagem de exemplo. As caixas indicam pessoas detectadas, e o alerta é determinado por sua posição nas zonas.
+**Canteiro de obras** (cenário `obra`): câmera elevada, com 12 pessoas detectadas e **uma zona vermelha e uma amarela para cada máquina**, a escavadeira e o guindaste. Duas pessoas estão no raio de giro da escavadeira (`PERIGO`). Cinco estão em faixas de aproximação (`ATENCAO`): uma junto à escavadeira e quatro junto ao guindaste. Outras cinco estão no caminho entre as máquinas, fora das zonas (`SEGURO`). Os três níveis aparecem na mesma cena. Alerta `CRITICO`.
+
+| Imagem de entrada | Resultado da inferência |
+|:---:|:---:|
+| ![Canteiro de obras com escavadeira, guindaste e trabalhadores](examples/imagens/obra.jpg) | ![Trabalhadores classificados nas zonas da escavadeira e do guindaste](docs/images/obra-alerta.png) |
+
+**Exemplo adicional — depósito** (cenário `deposito`): duas pessoas na faixa de aproximação da empilhadeira (`ATENCAO`).
+
+| Imagem de entrada | Resultado da inferência |
+|:---:|:---:|
+| ![Corredor de depósito com empilhadeira e trabalhadores](examples/imagens/test.jpg) | ![Pessoas na zona amarela do depósito](docs/images/deposito-alerta.png) |
 
 ## 2. Como funciona
 
@@ -33,7 +49,7 @@ flowchart LR
 1. A imagem é recebida pela API ou capturada da webcam/vídeo.
 2. O YOLO26n identifica objetos da classe COCO `person` (`classes=[0]`, confiança mínima de `0.35`, `device="cpu"`). A biblioteca Ultralytics realiza o pré-processamento e o pós-processamento próprios do detector.
 3. Para cada pessoa, o sistema calcula o **centro inferior da bounding box**, como aproximação da posição dos pés no piso.
-4. O ponto é comparado a polígonos de risco definidos em coordenadas normalizadas; a zona vermelha tem prioridade sobre a amarela.
+4. O ponto é comparado a polígonos de risco definidos em coordenadas normalizadas. Cada cor pode ter vários polígonos, um por máquina. A pessoa está em `PERIGO` se estiver em qualquer zona vermelha; caso contrário, em `ATENCAO` se estiver em qualquer zona amarela.
 5. O alerta global segue a maior criticidade observada: `CRITICO` > `ATENCAO` > `NORMAL`.
 6. A saída pode ser um JSON, uma imagem PNG anotada ou uma janela de monitoramento local.
 
@@ -52,9 +68,29 @@ flowchart LR
 | `padrao` | Exemplo genérico | Sim | Sim |
 | `deposito` | Região próxima a empilhadeira | Sim | Sim |
 | `corredor` | Faixa de circulação industrial | Sim | Sim |
+| `prensa` | Zona de exclusão de prensa hidráulica | Sim | Sim |
+| `obra` | Raio de giro de escavadeira e base de guindaste em canteiro de obras (duas zonas por cor) | Sim | Sim |
 | `webcam` | Demonstração com terço esquerdo vermelho, central amarelo e direito fora das zonas | Não | Sim |
 
 As zonas são parametrizadas para uma **posição de câmera fixa**. Se a câmera mudar de lugar ou enquadramento, é necessário recalibrar os polígonos em `app/zones.py`.
+
+### Como configurar as zonas
+
+Cada cenário em `CENARIOS` (`app/zones.py`) define as chaves `vermelha` e `amarela`, com coordenadas normalizadas entre 0 e 1 (x da esquerda para a direita, y de cima para baixo). Uma cor pode receber **um único polígono** ou **uma lista de polígonos**, um por máquina:
+
+```python
+"meu_cenario": {
+    # Um polígono por cor
+    "vermelha": [(0.30, 0.70), (0.50, 0.70), (0.50, 0.95), (0.30, 0.95)],
+    # Ou vários polígonos por cor (uma zona por máquina)
+    "amarela": [
+        [(0.25, 0.60), (0.55, 0.60), (0.55, 1.00), (0.25, 1.00)],
+        [(0.65, 0.40), (0.90, 0.40), (0.90, 0.80), (0.65, 0.80)]
+    ]
+},
+```
+
+Para disponibilizar um novo cenário na API, inclua o nome no `Literal` de `Cenario` em `app/main.py`.
 
 ## 3. Organização do repositório
 
@@ -69,8 +105,8 @@ app/
   criar_video_teste.py       # Geração de vídeo estático para teste
   testar_*.py                # Scripts auxiliares de demonstração
 tests/                       # Testes automatizados
-examples/imagens/test.jpg    # Imagem de entrada para a API
-docs/images/deposito-alerta.png # Exemplo de resultado anotado
+examples/imagens/            # Imagens de entrada: prensa.jpg, obra.jpg e test.jpg
+docs/images/                 # Resultados anotados: prensa-, obra- e deposito-alerta.png
 .github/workflows/docker-multiarch.yml
 Dockerfile
 docker-compose.yml
@@ -114,7 +150,7 @@ O `docker-compose.yml` define `restart: always`. O container disponibiliza **a A
 
 Os comandos abaixo estão adaptados ao **PowerShell**. Execute na raiz do repositório, com o container em execução. No Windows, use `curl.exe` para chamar o executável curl em vez do alias do PowerShell. **No Linux/macOS**, use `curl` com os mesmos argumentos (e `mkdir -p outputs` no lugar de `New-Item`).
 
-O arquivo é enviado no campo multipart `file`. O parâmetro opcional de query `cenario` aceita `padrao` (padrão), `deposito` ou `corredor`.
+O arquivo é enviado no campo multipart `file`. O parâmetro opcional de query `cenario` aceita `padrao` (padrão), `deposito`, `corredor`, `prensa` ou `obra`.
 
 ### 5.1. JSON — `POST /infer/json`
 
@@ -160,6 +196,48 @@ A resposta contém cenário, modelo, dimensões, número de pessoas, contagens, 
 }
 ```
 
+**Cenário `prensa`**, com alerta crítico:
+
+```powershell
+curl.exe -X POST "http://localhost:8000/infer/json?cenario=prensa" -F "file=@examples/imagens/prensa.jpg"
+```
+
+Resposta real para `examples/imagens/prensa.jpg` (1269 × 952 px), obtida em 06/11/2026:
+
+```json
+{
+  "cenario": "prensa",
+  "modelo": "yolo26n.pt",
+  "largura": 1269,
+  "altura": 952,
+  "total_pessoas": 2,
+  "contagem": {"SEGURO": 1, "ATENCAO": 0, "PERIGO": 1},
+  "tempo_inferencia_ms": 97.2,
+  "alerta": {
+    "ativo": true,
+    "nivel": "CRITICO",
+    "mensagem": "1 pessoa(s) na zona vermelha",
+    "resposta": "ALERTA_VISUAL_CRITICO"
+  },
+  "deteccoes": [
+    {
+      "classe": "person",
+      "confianca": 0.8664,
+      "bbox": [391, 323, 570, 811],
+      "ponto_referencia": [480, 811],
+      "risco": "PERIGO"
+    },
+    {
+      "classe": "person",
+      "confianca": 0.7944,
+      "bbox": [1117, 376, 1179, 558],
+      "ponto_referencia": [1148, 558],
+      "risco": "SEGURO"
+    }
+  ]
+}
+```
+
 As detecções e a classificação são determinísticas para a mesma imagem e o mesmo cenário. O `tempo_inferencia_ms` varia conforme o hardware e a carga do sistema a cada chamada.
 
 ### 5.2. PNG anotado — `POST /infer/image`
@@ -167,9 +245,11 @@ As detecções e a classificação são determinísticas para a mesma imagem e o
 ```powershell
 New-Item -ItemType Directory -Force outputs | Out-Null
 curl.exe -X POST "http://localhost:8000/infer/image?cenario=deposito" -F "file=@examples/imagens/test.jpg" --output "outputs/resultado.png"
+curl.exe -X POST "http://localhost:8000/infer/image?cenario=prensa" -F "file=@examples/imagens/prensa.jpg" --output "outputs/prensa.png"
+curl.exe -X POST "http://localhost:8000/infer/image?cenario=obra" -F "file=@examples/imagens/obra.jpg" --output "outputs/obra.png"
 ```
 
-A resposta tem `Content-Type: image/png`. Abra `outputs/resultado.png` para visualizar os polígonos, as caixas delimitadoras, o rótulo de cada pessoa (classe, risco e confiança, por exemplo `pessoa ATENCAO 84%`) e a faixa de alerta. O tamanho do texto acompanha a largura da imagem, para continuar legível em fotos de alta resolução.
+A resposta tem `Content-Type: image/png`. Abra os arquivos gerados em `outputs/` para visualizar os polígonos, as caixas delimitadoras, o rótulo de cada pessoa (classe, risco e confiança, por exemplo `pessoa ATENCAO 84%`) e a faixa de alerta. O tamanho do texto acompanha a largura da imagem, para continuar legível em fotos de alta resolução.
 
 **Validação de entradas:** arquivo vazio ou não decodificável retorna HTTP `400`; um cenário desconhecido retorna `422`.
 
@@ -179,9 +259,10 @@ A demonstração exigida no desafio apresenta os **dois endpoints obrigatórios 
 
 1. Subir o serviço com `docker compose up --build -d` e mostrar `docker compose ps` (política `restart: always`).
 2. Consultar `GET /health`.
-3. Enviar `examples/imagens/test.jpg` para `POST /infer/json?cenario=deposito` e comentar o JSON (pessoas, confiança, risco, alerta e tempo de inferência).
-4. Enviar a mesma imagem para `POST /infer/image?cenario=deposito` e abrir o PNG anotado.
-5. Opcionalmente, mostrar a documentação interativa em `/docs`.
+3. Enviar `examples/imagens/prensa.jpg` para `POST /infer/json?cenario=prensa` e comentar o JSON (pessoas, confiança, risco, alerta `CRITICO` e tempo de inferência).
+4. Enviar a mesma imagem para `POST /infer/image?cenario=prensa` e abrir o PNG anotado.
+5. Repetir o endpoint PNG com `examples/imagens/obra.jpg` e `cenario=obra`, para mostrar os três níveis de risco na mesma cena.
+6. Opcionalmente, mostrar a documentação interativa em `/docs`.
 
 **Vídeo da demonstração:** _link a ser adicionado._
 
@@ -334,7 +415,7 @@ ghcr.io/cainanjose/edge-ai-zonas-risco:latest
 
 O Dockerfile escolhe o PyTorch conforme a arquitetura: no AMD64, instala a versão somente CPU (índice `download.pytorch.org/whl/cpu`, sem as bibliotecas CUDA); no ARM64, usa as wheels padrão do PyPI. Os pesos `yolo26n.pt` são copiados para a imagem, então o container não depende de download do modelo em tempo de execução.
 
-**Evidência do build:** [GitHub Actions — execução #2 do workflow "Docker Multi-Arquitetura"](https://github.com/CainanJose/edge-ai-zonas-risco/actions/runs/42208927148), concluída com sucesso em 06/11/2026 (commit `84c027b`). A última etapa do workflow executa `docker buildx imagetools inspect` para listar as plataformas publicadas. Para consultar o manifesto (requer acesso ao pacote no GHCR):
+**Evidência do build:** [GitHub Actions — execução #3 do workflow "Docker Multi-Arquitetura"](https://github.com/CainanJose/edge-ai-zonas-risco/actions/runs/42303193722/job/128185901208), concluída com sucesso em 06/11/2026 (commit `0ec86ed`). A última etapa do workflow executa `docker buildx imagetools inspect` para listar as plataformas publicadas. Para consultar o manifesto (requer acesso ao pacote no GHCR):
 
 ```bash
 docker buildx imagetools inspect ghcr.io/cainanjose/edge-ai-zonas-risco:latest
@@ -426,4 +507,8 @@ Em um curso presencial de IA aplicada, o repositório serve como laboratório pr
 
 **Licenças de terceiros:** a biblioteca Ultralytics e os pesos pré-treinados do YOLO26 são distribuídos pela Ultralytics sob a licença AGPL-3.0, com opção de licença comercial. O uso fora do contexto acadêmico e demonstrativo deve observar esses termos.
 
-**Imagens de exemplo:** `examples/imagens/test.jpg` e o resultado derivado `docs/images/deposito-alerta.png` são usados apenas para demonstrar o funcionamento do protótipo. A procedência e a licença de redistribuição da imagem original não estão documentadas neste repositório.
+**Imagens de exemplo:**
+
+- `examples/imagens/prensa.jpg` e `examples/imagens/obra.jpg` são **imagens sintéticas geradas por IA**. Elas são usadas apenas para demonstrar a lógica de zonas e alertas e **não têm valor como validação de precisão** do detector em ambiente industrial real.
+- `examples/imagens/test.jpg` (depósito) é usada apenas para demonstrar o funcionamento do protótipo. Sua procedência e licença de redistribuição não estão documentadas neste repositório.
+- Os resultados em `docs/images/` foram gerados pelo próprio pipeline a partir dessas imagens.

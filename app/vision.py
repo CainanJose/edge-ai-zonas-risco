@@ -29,21 +29,22 @@ def analisar_imagem(imagem, cenario="padrao"):
     # 1. Configuracao das zonas
     zonas = obter_zonas(largura, altura, cenario)
 
-    zona_vermelha = zonas["vermelha"]
-    zona_amarela = zonas["amarela"]
+    # Cada cor pode ter varios poligonos (um por maquina)
+    zonas_vermelhas = zonas["vermelha"]
+    zonas_amarelas = zonas["amarela"]
 
     # 2. Desenha as zonas de risco
     sobreposicao = imagem.copy()
 
     cv2.fillPoly(
         sobreposicao,
-        [zona_amarela],
+        zonas_amarelas,
         (0, 255, 255)
     )
 
     cv2.fillPoly(
         sobreposicao,
-        [zona_vermelha],
+        zonas_vermelhas,
         (0, 0, 255)
     )
 
@@ -54,7 +55,7 @@ def analisar_imagem(imagem, cenario="padrao"):
     # Desenha os contornos
     cv2.polylines(
         anotada,
-        [zona_vermelha],
+        zonas_vermelhas,
         True,
         (0, 0, 255),
         3
@@ -62,7 +63,7 @@ def analisar_imagem(imagem, cenario="padrao"):
 
     cv2.polylines(
         anotada,
-        [zona_amarela],
+        zonas_amarelas,
         True,
         (0, 255, 255),
         3
@@ -149,14 +150,25 @@ def analisar_imagem(imagem, cenario="padrao"):
             -1
         )
 
-        # Adiciona a legenda
-        texto = f"pessoa {risco} {confianca:.0%}"
+        # Adiciona a legenda.
+        # Em pessoas pequenas na imagem (cenas com camera elevada e
+        # muitas pessoas), o rotulo completo sobrepoe os vizinhos.
+        # Nesse caso, mostra so a confianca com fonte menor; a cor
+        # da caixa continua indicando o risco.
+        if (y2 - y1) < 0.2 * altura:
+            texto = f"{confianca:.0%}"
+            escala_rotulo = escala * 0.8
+            espessura_rotulo = max(1, int(round(escala_rotulo * 2)))
+        else:
+            texto = f"pessoa {risco} {confianca:.0%}"
+            escala_rotulo = escala
+            espessura_rotulo = espessura
 
         tamanho, _ = cv2.getTextSize(
             texto,
             cv2.FONT_HERSHEY_SIMPLEX,
-            escala,
-            espessura
+            escala_rotulo,
+            espessura_rotulo
         )
 
         # Mantem o texto dentro dos limites da imagem
@@ -172,9 +184,9 @@ def analisar_imagem(imagem, cenario="padrao"):
             texto,
             (x_texto, y_texto),
             cv2.FONT_HERSHEY_SIMPLEX,
-            escala,
+            escala_rotulo,
             cor,
-            espessura
+            espessura_rotulo
         )
 
     # 6. Gera o alerta automaticamente

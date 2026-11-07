@@ -16,7 +16,7 @@ app = FastAPI(
 )
 
 # Cenarios disponiveis
-Cenario = Literal["padrao", "deposito", "corredor"]
+Cenario = Literal["padrao", "deposito", "corredor", "prensa", "obra"]
 
 
 async def carregar_imagem(file: UploadFile):
