@@ -1,6 +1,6 @@
 # Edge AI — Monitoramento de Risco em Zonas de Máquinas Pesadas
 
-Protótipo de **visão computacional embarcada (Edge AI)** para detectar pessoas e sinalizar sua presença em regiões virtuais de risco de um ambiente industrial. Desenvolvido como parte do desafio técnico do **FIT Sorocaba — Analista de Capacitação Tecnológica II / Professor de Inteligência Artificial**.
+Protótipo de **visão computacional embarcada (Edge AI)** para detectar pessoas e sinalizar sua presença em regiões virtuais de risco de um ambiente industrial.
 
 A aplicação utiliza **YOLO26n**, **Python**, **OpenCV** e **FastAPI**. A inferência ocorre **localmente em CPU**, sem solicitar inferência a um serviço em nuvem. A API é distribuída em Docker, com build multi-arquitetura **AMD64/ARM64** para possibilitar adaptação à **Raspberry Pi 5**.
 
@@ -114,7 +114,7 @@ requirements.txt
 yolo26n.pt                  # Pesos locais do modelo
 ```
 
-## 4. Executar com Docker (forma recomendada para avaliação)
+## 4. Executar com Docker 
 
 **Pré-requisitos:** Git e Docker Desktop (Windows) ou Docker Engine com Compose (Linux). Não é necessária uma Raspberry Pi física.
 
@@ -255,7 +255,7 @@ A resposta tem `Content-Type: image/png`. Abra os arquivos gerados em `outputs/`
 
 ## 6. Demonstração técnica
 
-A demonstração exigida no desafio apresenta os **dois endpoints obrigatórios com a aplicação em Docker**, ao vivo ou em vídeo de até cinco minutos. O roteiro previsto é:
+A demonstração técnica apresenta o funcionamento dos endpoints HTTP com a aplicação executando em Docker.. O roteiro previsto é:
 
 1. Subir o serviço com `docker compose up --build -d` e mostrar `docker compose ps` (política `restart: always`).
 2. Consultar `GET /health`.
@@ -264,7 +264,6 @@ A demonstração exigida no desafio apresenta os **dois endpoints obrigatórios 
 5. Repetir o endpoint PNG com `examples/imagens/obra.jpg` e `cenario=obra`, para mostrar os três níveis de risco na mesma cena.
 6. Opcionalmente, mostrar a documentação interativa em `/docs`.
 
-**Vídeo da demonstração:** _link a ser adicionado._
 
 O monitoramento por webcam (seção 7) é uma demonstração complementar e não substitui a apresentação dos endpoints em Docker.
 
